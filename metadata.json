@@ -1,0 +1,7 @@
+{
+  "name": "Odd One Out",
+  "description": "A social deduction word game where players give clues to prove they know the secret topic, while imposters try to blend in.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
