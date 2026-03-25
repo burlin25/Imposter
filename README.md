@@ -6,11 +6,11 @@
   <img src="assets/game_photo3.png" width="800"/>
 </div>
 
-# Run and deploy your AI Studio app
+# Deploy
 
-This contains everything you need to run your app locally.
+This contains everything you need to run the app locally.
 
-View your app in AI Studio: https://ai.studio/apps/a6a543f9-c731-4c2b-af10-0127aa6211dc
+View app: https://ai.studio/apps/a6a543f9-c731-4c2b-af10-0127aa6211dc
 
 ## Run Locally
 
