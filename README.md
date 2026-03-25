@@ -5,6 +5,7 @@
   <br/>
   <img src="./assets/game_photo3.png" width="800"/>
 </div>
+<img width="1512" height="982" alt="image" src="https://github.com/user-attachments/assets/c8723cfe-306f-4638-b938-524c40af8b84" />
 
 # Deploy
 
