@@ -1,11 +1,10 @@
 <div align="center">
-  <img src="./assets/game_photo1.png" width="800"/>
+  <img width="836" height="580" alt="image" src="https://github.com/user-attachments/assets/050cd10d-7dbc-45da-bc1d-8fb150606282" />
   <br/>
-  <img src="./assets/game_photo2.png" width="800"/>
+  <img width="954" height="620" alt="game_photo3" src="https://github.com/user-attachments/assets/6d0b8cf6-6602-4056-8dc6-fa43c6b67965" />
   <br/>
-  <img src="./assets/game_photo3.png" width="800"/>
+  <img width="1092" height="708" alt="game_photo2" src="https://github.com/user-attachments/assets/f6697863-f38f-4888-814a-e62948023267" />
 </div>
-<img width="1512" height="982" alt="image" src="https://github.com/user-attachments/assets/c8723cfe-306f-4638-b938-524c40af8b84" />
 
 # Deploy
 
