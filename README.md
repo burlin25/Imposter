@@ -1,9 +1,9 @@
 <div align="center">
-  <img src="assets/game_photo1.png" width="800"/>
+  <img src="./assets/game_photo1.png" width="800"/>
   <br/>
-  <img src="assets/game_photo2.png" width="800"/>
+  <img src="./assets/game_photo2.png" width="800"/>
   <br/>
-  <img src="assets/game_photo3.png" width="800"/>
+  <img src="./assets/game_photo3.png" width="800"/>
 </div>
 
 # Deploy
