@@ -1,0 +1,6 @@
+# This file ensures the assets directory is tracked in Git.
+# Place your game photos here: game_photo1.png, game_photo2.png, game_photo3.png
+assets/
+├─ game_photo1.png
+├─ game_photo2.png
+└─ game_photo3.png
