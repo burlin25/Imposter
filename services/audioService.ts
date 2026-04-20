@@ -6,8 +6,11 @@ class AudioService {
   private isSfxMuted: boolean = false;
   private isStarted: boolean = false;
   
-  // High-quality Mystery Trap theme
-  private musicUrl: string = 'https://cdn.pixabay.com/audio/2024/02/08/audio_824599988a.mp3';
+  // High-quality chill mystery theme
+  private musicUrl: string = 'https://cdn.pixabay.com/audio/2022/03/10/audio_c352c1bdc2.mp3'; // Lofi chill track
+  private lobbyMusicUrl: string = 'https://cdn.pixabay.com/audio/2022/01/21/audio_31743c589f.mp3'; // More upbeat lobby track
+
+  private currentMusic: HTMLAudioElement | null = null;
 
   constructor() {
     this.isMusicMuted = localStorage.getItem('game_music_muted') === 'true';
@@ -23,14 +26,10 @@ class AudioService {
     }
   }
 
-  /**
-   * Unlocks audio on first user interaction.
-   * This is crucial for modern browsers.
-   */
   async unlock() {
     if (this.isStarted) return;
     await this.initContext();
-    await this.playMusic();
+    await this.playMusic('lobby');
     this.isStarted = true;
     console.debug("Audio System Unlocked");
   }
@@ -38,9 +37,9 @@ class AudioService {
   toggleMusicMute(): boolean {
     this.isMusicMuted = !this.isMusicMuted;
     localStorage.setItem('game_music_muted', String(this.isMusicMuted));
-    if (this.music) {
-      this.music.muted = this.isMusicMuted;
-      if (!this.isMusicMuted) this.music.play().catch(() => {});
+    if (this.currentMusic) {
+      this.currentMusic.muted = this.isMusicMuted;
+      if (!this.isMusicMuted) this.currentMusic.play().catch(() => {});
     }
     return this.isMusicMuted;
   }
@@ -54,28 +53,47 @@ class AudioService {
   getMusicMuted(): boolean { return this.isMusicMuted; }
   getSfxMuted(): boolean { return this.isSfxMuted; }
 
-  async playMusic() {
-    if (this.music) {
-      if (!this.isMusicMuted && this.music.paused) {
-        this.music.play().catch(() => {});
+  async playMusic(type: 'lobby' | 'game' = 'game') {
+    const url = type === 'lobby' ? this.lobbyMusicUrl : this.musicUrl;
+    
+    if (this.currentMusic) {
+      if (this.currentMusic.src === url) {
+        if (!this.isMusicMuted && this.currentMusic.paused) {
+          this.currentMusic.play().catch(() => {});
+        }
+        return;
       }
-      return;
+      // Fade out current music
+      const oldMusic = this.currentMusic;
+      let vol = oldMusic.volume;
+      const fadeOut = setInterval(() => {
+        vol -= 0.05;
+        if (vol <= 0) {
+          clearInterval(fadeOut);
+          oldMusic.pause();
+        } else {
+          oldMusic.volume = vol;
+        }
+      }, 50);
     }
     
-    this.music = new Audio(this.musicUrl);
-    this.music.loop = true;
-    this.music.volume = 0.3;
-    this.music.muted = this.isMusicMuted;
-    this.music.crossOrigin = "anonymous";
+    this.currentMusic = new Audio(url);
+    this.currentMusic.loop = true;
+    this.currentMusic.volume = 0.2;
+    this.currentMusic.muted = this.isMusicMuted;
+    this.currentMusic.crossOrigin = "anonymous";
+    
+    console.debug(`Attempting to play music: ${type} (${url})`);
     
     try {
-      await this.music.play();
+      await this.currentMusic.play();
+      console.debug("Music playback started successfully");
     } catch (e) {
-      console.debug("Music autoplay blocked. Waiting for interaction.");
+      console.warn("Music playback failed or was blocked:", e);
     }
   }
 
-  async playSfx(type: 'click' | 'success' | 'danger' | 'pop' | 'reveal' | 'vote') {
+  async playSfx(type: 'click' | 'success' | 'danger' | 'pop' | 'reveal' | 'vote' | 'transition') {
     if (this.isSfxMuted) return;
     await this.initContext();
     if (!this.ctx) return;
@@ -140,6 +158,15 @@ class AudioService {
         gain.gain.linearRampToValueAtTime(0, now + 0.3);
         osc.start(now);
         osc.stop(now + 0.3);
+        break;
+      case 'transition':
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(200, now);
+        osc.frequency.exponentialRampToValueAtTime(800, now + 0.5);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+        osc.start(now);
+        osc.stop(now + 0.5);
         break;
     }
   }

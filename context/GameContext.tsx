@@ -175,8 +175,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [myPlayerId, state.gameCode]);
 
   useEffect(() => {
-    if (state.phase !== GamePhase.HOME) {
-        audioService.playMusic();
+    if (state.phase === GamePhase.HOME || state.phase === GamePhase.LOBBY) {
+        audioService.playMusic('lobby');
+    } else {
+        audioService.playMusic('game');
     }
   }, [state.phase]);
 
@@ -213,11 +215,22 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         case 'RECOVER_PLAYER': {
             if (action.recoveryAction === 'KICK') {
-                return {
+                const kickedIdx = currentState.players.findIndex(p => p.id === action.playerId);
+                const newState = {
                     ...currentState,
-                    disconnectedPlayerId: null,
+                    disconnectedPlayerId: currentState.disconnectedPlayerId === action.playerId ? null : currentState.disconnectedPlayerId,
                     players: currentState.players.filter(p => p.id !== action.playerId)
                 };
+                
+                if (kickedIdx !== -1 && kickedIdx <= currentState.currentTurnIndex) {
+                    newState.currentTurnIndex = Math.max(0, currentState.currentTurnIndex - 1);
+                }
+                
+                if (newState.currentTurnIndex >= newState.players.length) {
+                    newState.currentTurnIndex = 0;
+                }
+                
+                return newState;
             } else {
                 return {
                     ...currentState,
@@ -527,6 +540,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const handlePlayerRecovery = (playerId: string, action: 'KICK' | 'AI') => {
+      audioService.playSfx('danger');
       dispatch({ type: 'RECOVER_PLAYER', playerId, recoveryAction: action });
   };
 

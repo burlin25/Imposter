@@ -24,7 +24,7 @@ export const Avatar: React.FC<AvatarProps> = ({ seed, url, name, size = 'md', hi
 
   return (
     <div className={`flex flex-col items-center gap-2 ${className}`} onClick={onClick}>
-      <div className={`relative rounded-full overflow-hidden bg-slate-700 border-4 transition-all ${sizeClasses[size]} ${highlight ? 'border-game-accent shadow-[0_0_15px_rgba(139,92,246,0.5)]' : 'border-transparent'}`}>
+      <div className={`relative rounded-full overflow-hidden border-4 transition-all ${sizeClasses[size]} ${highlight ? 'border-game-accent shadow-[0_0_15px_rgba(139,92,246,0.5)]' : 'border-transparent'}`}>
         <img src={src} alt="avatar" className="w-full h-full object-cover" />
       </div>
       {name && <span className="font-semibold text-slate-200 truncate max-w-[120px] text-center">{name}</span>}
