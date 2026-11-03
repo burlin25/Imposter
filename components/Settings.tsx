@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Avatar } from './Avatar';
 
 export const Settings: React.FC = () => {
-  const { state, reconnectGame, leaveGame, myPlayerId, amIGameHost, handlePlayerRecovery } = useGame();
+  const { state, reconnectGame, leaveGame, myPlayerId, isNetworkHost, handlePlayerRecovery } = useGame();
   const [isOpen, setIsOpen] = useState(false);
   const [musicMuted, setMusicMuted] = useState(audioService.getMusicMuted());
   const [sfxMuted, setSfxMuted] = useState(audioService.getSfxMuted());
@@ -188,7 +188,7 @@ export const Settings: React.FC = () => {
                           <div className="h-px bg-white/5" />
                           
                           {/* Player Management for Host */}
-                          {amIGameHost && (
+                          {isNetworkHost && (
                             <div className="space-y-3">
                               <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">
                                 <Users size={12} />

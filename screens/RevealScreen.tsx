@@ -15,11 +15,11 @@ export const RevealScreen: React.FC = () => {
   useEffect(() => {
     const t1 = setTimeout(() => {
       setStage(1);
-    }, 3000); 
+    }, 1500);
     const t2 = setTimeout(() => {
       setStage(2);
       audioService.playSfx('reveal');
-    }, 6000); 
+    }, 3200);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
 

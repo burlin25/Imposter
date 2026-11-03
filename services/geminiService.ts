@@ -1,12 +1,17 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Initialize using a named parameter and exclusively using process.env.API_KEY
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Initialize only inside a request's try/catch so a missing optional key
+// uses the fallback response instead of crashing the entire app on import.
+let ai: GoogleGenAI | undefined;
+const getAI = () => {
+  ai ??= new GoogleGenAI({ apiKey: process.env.API_KEY });
+  return ai;
+};
 
 export const generateHostTopic = async (): Promise<{ topic: string, category: string }> => {
   try {
-    const response = await ai.models.generateContent({
+    const response = await getAI().models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: "Generate a unique and specific secret topic and its category for a social deduction game. Avoid common topics like 'The Moon'. Think of something interesting like 'A Disco Ball', 'The Titanic', or 'Quicksand'. Return as JSON with keys 'topic' and 'category'.",
       config: {
@@ -31,7 +36,7 @@ export const generateHostTopic = async (): Promise<{ topic: string, category: st
 
 export const generateGameTopic = async (): Promise<string> => {
   try {
-    const response = await ai.models.generateContent({
+    const response = await getAI().models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: "Generate a single, interesting, specific noun or short phrase suitable for a game of 'Imposter'. Examples: 'The Eiffel Tower', 'Sushi', 'Mars Landing'. Return ONLY the phrase, no quotes.",
       config: {
@@ -54,7 +59,7 @@ export const generateClue = async (role: 'INNOCENT' | 'IMPOSTER', topic: string,
             ? `You are playing 'Imposter'. Topic: '${topic}', Category: '${category}'. Think carefully: Give a subtle one-word or very short phrase clue that proves you know the topic without giving it away to the Imposter. Do not use the word '${topic}'.`
             : `You are playing 'Imposter'. You DON'T know the topic, only Category: '${category}'. Think carefully: Give a vague but confident one-word clue related to '${category}' to blend in with others.`;
 
-        const response = await ai.models.generateContent({
+        const response = await getAI().models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,
             config: {
@@ -73,7 +78,7 @@ export const generateClue = async (role: 'INNOCENT' | 'IMPOSTER', topic: string,
 
 export const generateImposterGuess = async (category: string, clues: string[]): Promise<string> => {
     try {
-        const response = await ai.models.generateContent({
+        const response = await getAI().models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: `You are the Imposter. Category: '${category}'. Clues given by others: ${clues.join(', ')}. Analyze these clues carefully to deduce the secret topic. Return only the deduced topic name.`,
             config: { 

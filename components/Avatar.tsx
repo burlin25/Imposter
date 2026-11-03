@@ -5,7 +5,7 @@ interface AvatarProps {
   seed: string;
   url?: string;
   name?: string;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   highlight?: boolean;
   className?: string;
   onClick?: () => void;
@@ -13,6 +13,7 @@ interface AvatarProps {
 
 export const Avatar: React.FC<AvatarProps> = ({ seed, url, name, size = 'md', highlight, className = '', onClick }) => {
   const sizeClasses = {
+    xs: "w-7 h-7 text-[10px]",
     sm: "w-10 h-10 text-xs",
     md: "w-16 h-16 text-sm",
     lg: "w-24 h-24 text-base",

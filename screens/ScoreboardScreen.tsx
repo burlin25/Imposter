@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Trophy, RefreshCw, LogOut, Check, Loader2, Star, Award, TrendingUp } from 'lucide-react';
 
 export const ScoreboardScreen: React.FC = () => {
-  const { state, acknowledgeRoundEnd, resetGame, myPlayerId } = useGame();
+  const { state, acknowledgeRoundEnd, resetGame, myPlayerId, isNetworkHost } = useGame();
   const { players, winningPlayerId, phase, currentCycle } = state;
 
   const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
@@ -59,12 +59,18 @@ export const ScoreboardScreen: React.FC = () => {
                 transition={{ delay: 0.6 }}
                 className="flex gap-4 w-full max-w-sm"
              >
-                 <Button onClick={resetGame} fullWidth className="!py-5 shadow-yellow-400/20 shadow-xl">
-                    <div className="flex items-center justify-center gap-2">
-                        <RefreshCw size={20} />
-                        PLAY AGAIN
-                    </div>
-                 </Button>
+                 {isNetworkHost ? (
+                   <Button onClick={resetGame} fullWidth className="!py-5 shadow-yellow-400/20 shadow-xl">
+                      <div className="flex items-center justify-center gap-2">
+                          <RefreshCw size={20} />
+                          PLAY AGAIN
+                      </div>
+                   </Button>
+                 ) : (
+                   <div className="flex-1 min-w-0 flex items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">
+                      Waiting for room host
+                   </div>
+                 )}
                  <Button variant="secondary" onClick={() => window.location.reload()} className="!py-5">
                     <div className="flex items-center justify-center gap-2">
                         <LogOut size={20} />

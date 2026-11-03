@@ -15,10 +15,27 @@ import { Button } from './components/Button';
 import { Settings } from './components/Settings';
 import { audioService } from './services/audioService';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertTriangle, UserMinus, Cpu, WifiOff } from 'lucide-react';
+import { AlertTriangle, UserMinus, Cpu, Wifi, WifiOff } from 'lucide-react';
+
+const ConnectionBanner: React.FC = () => {
+    const { connectionStatus, state } = useGame();
+    if (!state.gameCode || connectionStatus === 'connected') return null;
+
+    const isReconnecting = connectionStatus === 'reconnecting';
+    return (
+        <motion.div
+            initial={{ y: -48, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className={`fixed top-4 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-2 rounded-full px-4 py-2 text-xs font-black uppercase tracking-wider shadow-2xl border ${isReconnecting ? 'bg-amber-500/20 border-amber-300/40 text-amber-100' : 'bg-red-500/20 border-red-300/40 text-red-100'}`}
+        >
+            {isReconnecting ? <Wifi size={15} className="animate-pulse" /> : <WifiOff size={15} />}
+            {isReconnecting ? 'Reconnecting to room…' : 'Connection lost — use Rejoin in Settings'}
+        </motion.div>
+    );
+};
 
 const RecoveryOverlay: React.FC = () => {
-    const { state, amIGameHost, handlePlayerRecovery } = useGame();
+    const { state, isNetworkHost, handlePlayerRecovery } = useGame();
     if (!state.disconnectedPlayerId) return null;
 
     const droppedPlayer = state.players.find(p => p.id === state.disconnectedPlayerId);
@@ -50,12 +67,12 @@ const RecoveryOverlay: React.FC = () => {
                     </h2>
                     
                     <p className="text-slate-400 text-sm mb-8">
-                        {amIGameHost 
+                        {isNetworkHost
                             ? "Connection lost. You can wait for them to return, or take action below." 
                             : "Waiting for the host or for the player to rejoin. The session will stay open indefinitely."}
                     </p>
 
-                    {amIGameHost ? (
+                    {isNetworkHost ? (
                         <div className="flex flex-col gap-3">
                             <Button variant="primary" fullWidth onClick={() => handlePlayerRecovery(droppedPlayer.id, 'AI')}>
                                 <div className="flex items-center justify-center gap-2">
@@ -300,6 +317,7 @@ const GameRouter: React.FC = () => {
 const App: React.FC = () => (
   <>
     <Settings />
+    <ConnectionBanner />
     <RecoveryOverlay />
     <GameRouter />
   </>

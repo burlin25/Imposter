@@ -44,6 +44,9 @@ export interface GameConfig {
 }
 
 export interface GameState {
+  /** Monotonically increasing host-issued snapshot number. Prevents an older
+   * network packet from moving a player back to a previous screen. */
+  syncVersion: number;
   gameCode: string;
   phase: GamePhase;
   players: Player[];
@@ -75,6 +78,7 @@ export interface GameContextType {
   state: GameState;
   isHost: boolean; 
   isNetworkHost: boolean; 
+  connectionStatus: 'connected' | 'reconnecting' | 'offline';
   myPlayerId: string | null;
   amIGameHost: boolean; 
   createGame: (name: string, avatarUrl?: string) => void;

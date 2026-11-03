@@ -11,7 +11,7 @@ type GameAction =
   | { type: 'UPDATE_CONFIG'; config: Partial<GameConfig> }
   | { type: 'START_GAME' }
   | { type: 'SET_TOPIC'; topic: string; category: string; image?: string; manualImposterIds?: string[] }
-  | { type: 'SUBMIT_CLUE'; text: string }
+  | { type: 'SUBMIT_CLUE'; playerId: string; text: string }
   | { type: 'SUBMIT_VOTE'; voterId: string; votedForId: string }
   | { type: 'START_VOTING' }
   | { type: 'CONFIRM_STARTER' }
@@ -27,6 +27,7 @@ type GameAction =
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
 const INITIAL_STATE: GameState = {
+  syncVersion: 0,
   gameCode: '',
   phase: GamePhase.HOME,
   players: [],
@@ -54,10 +55,21 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [state, setState] = useState<GameState>(INITIAL_STATE);
   const [isHost, setIsHost] = useState(false);
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'reconnecting' | 'offline'>('offline');
   
   const peerRef = useRef<Peer | null>(null);
   const connectionsRef = useRef<DataConnection[]>([]);
   const hostConnRef = useRef<DataConnection | null>(null);
+  const previousPhaseRef = useRef<GamePhase>(INITIAL_STATE.phase);
+  const expectedRoomRef = useRef<string | null>(null);
+  // Peer callbacks outlive React renders. These refs keep their view of the
+  // room current instead of closing over the state from the initial render.
+  const stateRef = useRef<GameState>(INITIAL_STATE);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   // BOT AUTO-INTELLIGENCE Logic
   useEffect(() => {
@@ -93,7 +105,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const timer = setTimeout(async () => {
                 const role = currentPlayer.isImposter ? 'IMPOSTER' : 'INNOCENT';
                 const clueText = await generateClue(role, state.topic, state.category);
-                dispatch({ type: 'SUBMIT_CLUE', text: clueText });
+                dispatch({ type: 'SUBMIT_CLUE', playerId: currentPlayer.id, text: clueText });
             }, 3000);
             return () => clearTimeout(timer);
         }
@@ -176,18 +188,40 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     if (state.phase === GamePhase.HOME || state.phase === GamePhase.LOBBY) {
-        audioService.playMusic('lobby');
+      audioService.playMusic('lobby');
     } else {
-        audioService.playMusic('game');
+      audioService.playMusic('game');
+    }
+  }, [state.phase]);
+
+  useEffect(() => {
+    const previousPhase = previousPhaseRef.current;
+    if (previousPhase !== state.phase) {
+      audioService.playSfx(state.phase === GamePhase.REVEAL ? 'reveal' : 'transition');
+      previousPhaseRef.current = state.phase;
     }
   }, [state.phase]);
 
   const broadcastState = (newState: GameState) => {
+    connectionsRef.current = connectionsRef.current.filter(conn => conn.open);
     connectionsRef.current.forEach(conn => {
       if (conn.open) {
         conn.send({ type: 'SYNC_STATE', state: newState });
       }
     });
+  };
+
+  const acceptSnapshot = (incoming: GameState) => {
+    // DataConnections are reliable, but a reconnect can briefly leave two
+    // connections alive. Never let an old snapshot send a client backwards.
+    const normalized = { ...incoming, syncVersion: incoming.syncVersion ?? 0 };
+    const isExpectedRoom = !expectedRoomRef.current || normalized.gameCode === expectedRoomRef.current;
+    const isNewRoom = normalized.gameCode !== stateRef.current.gameCode;
+    if (normalized.gameCode && isExpectedRoom && (isNewRoom || normalized.syncVersion >= stateRef.current.syncVersion)) {
+      stateRef.current = normalized;
+      setState(normalized);
+      setConnectionStatus('connected');
+    }
   };
 
   const processAction = (action: GameAction, currentState: GameState): GameState => {
@@ -204,9 +238,13 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 };
                 return { ...currentState, players: updatedPlayers, disconnectedPlayerId: currentState.disconnectedPlayerId === action.player.id ? null : currentState.disconnectedPlayerId };
             }
+            // A new identity may enter while the room is forming, but joining
+            // a live round would change clue/vote totals without a role reveal.
+            if (currentState.phase !== GamePhase.LOBBY) return currentState;
             return { ...currentState, players: [...currentState.players, action.player] };
         
         case 'PLAYER_DISCONNECTED':
+            if (!currentState.players.some(p => p.id === action.playerId && !p.isDisconnected)) return currentState;
             return {
                 ...currentState,
                 disconnectedPlayerId: action.playerId,
@@ -216,18 +254,53 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         case 'RECOVER_PLAYER': {
             if (action.recoveryAction === 'KICK') {
                 const kickedIdx = currentState.players.findIndex(p => p.id === action.playerId);
+                if (kickedIdx === -1) return currentState;
+                const remainingPlayers = currentState.players.filter(p => p.id !== action.playerId);
+                const existingHost = remainingPlayers.find(p => p.id === currentState.currentHostId && !p.isDisconnected);
+                const needsReplacementHost = !existingHost && currentState.phase !== GamePhase.LOBBY;
+                const replacementHost = needsReplacementHost
+                    ? (remainingPlayers.find(p => !p.isDisconnected && !p.isImposter) || remainingPlayers.find(p => !p.isDisconnected))
+                    : existingHost;
+                const nextHostId = replacementHost?.id || null;
+                const remappedPlayers = remainingPlayers.map(p => ({
+                    ...p,
+                    isHost: p.id === nextHostId,
+                    // A replacement moderator must acknowledge role reveal
+                    // before the round can continue.
+                    isReady: needsReplacementHost && p.id === nextHostId && currentState.phase === GamePhase.ROLE_REVEAL ? false : p.isReady
+                }));
                 const newState = {
                     ...currentState,
                     disconnectedPlayerId: currentState.disconnectedPlayerId === action.playerId ? null : currentState.disconnectedPlayerId,
-                    players: currentState.players.filter(p => p.id !== action.playerId)
+                    currentHostId: nextHostId,
+                    players: remappedPlayers
                 };
                 
-                if (kickedIdx !== -1 && kickedIdx <= currentState.currentTurnIndex) {
+                // Keep the turn on the same player when someone before them
+                // leaves. If the active player leaves, move to the next
+                // non-moderator instead of landing on the host index.
+                if (remainingPlayers.length > 0 && kickedIdx < currentState.currentTurnIndex) {
                     newState.currentTurnIndex = Math.max(0, currentState.currentTurnIndex - 1);
                 }
-                
-                if (newState.currentTurnIndex >= newState.players.length) {
+                if (newState.currentTurnIndex >= remainingPlayers.length) {
                     newState.currentTurnIndex = 0;
+                }
+                if (remainingPlayers.length > 0) {
+                    let attempts = 0;
+                    while ((newState.players[newState.currentTurnIndex].isHost || newState.players[newState.currentTurnIndex].isDisconnected) && attempts < remainingPlayers.length) {
+                        newState.currentTurnIndex = (newState.currentTurnIndex + 1) % remainingPlayers.length;
+                        attempts += 1;
+                    }
+                }
+
+                // Removing the last unready player can satisfy the ready
+                // barrier. Re-run the normal barrier transition immediately
+                // so the room does not wait for a click that cannot happen.
+                if ((currentState.phase === GamePhase.ROLE_REVEAL || currentState.phase === GamePhase.SCOREBOARD) && newState.players.length > 0) {
+                    const readyPlayer = newState.players.find(p => p.isReady || p.isBot || p.isDisconnected);
+                    if (readyPlayer && newState.players.every(p => p.isReady || p.isBot || p.isDisconnected)) {
+                        return processAction({ type: 'ACK_ROUND_END', playerId: readyPlayer.id }, newState);
+                    }
                 }
                 
                 return newState;
@@ -241,9 +314,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         case 'UPDATE_CONFIG':
+            if (currentState.phase !== GamePhase.LOBBY) return currentState;
             return { ...currentState, config: { ...currentState.config, ...action.config } };
         
         case 'ADD_BOT': {
+             if (currentState.phase !== GamePhase.LOBBY) return currentState;
              audioService.playSfx('pop');
              const names = ["Unit-X", "Spark", "Gizmo", "Chip", "Bolt", "Nexus", "Circuit", "Pixel", "Droid", "Robo"];
              const botPlayer: Player = {
@@ -261,6 +336,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         case 'START_GAME': {
+            if (currentState.phase !== GamePhase.LOBBY) return currentState;
             audioService.playSfx('success');
             if (currentState.players.length < 4) return currentState;
             const randHostIdx = Math.floor(Math.random() * currentState.players.length);
@@ -281,6 +357,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         case 'SET_TOPIC': {
+            if (currentState.phase !== GamePhase.TOPIC_SELECTION) return currentState;
             audioService.playSfx('pop');
             const hostId = currentState.currentHostId;
             const manualImposterIds = action.manualImposterIds || [];
@@ -331,15 +408,19 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         
         case 'CONFIRM_STARTER':
+            if (currentState.phase !== GamePhase.ROUND_STARTER) return currentState;
             return { ...currentState, phase: GamePhase.DISCUSSION };
 
         case 'START_VOTING':
+             if (currentState.phase !== GamePhase.DISCUSSION) return currentState;
              audioService.playSfx('danger');
              return { ...currentState, phase: GamePhase.VOTING };
 
         case 'SUBMIT_CLUE': {
+            if (currentState.phase !== GamePhase.CLUES) return currentState;
             audioService.playSfx('pop');
             const currentPlayer = currentState.players[currentState.currentTurnIndex];
+            if (!currentPlayer || currentPlayer.id !== action.playerId || currentPlayer.isHost) return currentState;
             const newClues = [...currentState.clues, { playerId: currentPlayer.id, text: action.text, timestamp: Date.now() }];
             const activePlayerCount = currentState.players.length - 1;
             const totalCluesNeeded = activePlayerCount * 2;
@@ -352,6 +433,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         case 'SUBMIT_VOTE': {
+            if (currentState.phase !== GamePhase.VOTING || currentState.votes[action.voterId]) return currentState;
+            const voter = currentState.players.find(p => p.id === action.voterId);
+            const candidate = currentState.players.find(p => p.id === action.votedForId);
+            if (!voter || voter.isHost || voter.isDisconnected || !candidate || candidate.isHost || candidate.id === voter.id) return currentState;
             audioService.playSfx('vote');
             const newVotes = { ...currentState.votes, [action.voterId]: action.votedForId };
             const playersWhoMustVote = currentState.players.filter(p => !p.isHost && !p.isDisconnected);
@@ -368,13 +453,16 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         
         case 'START_IMPOSTER_GUESS':
+             if (currentState.phase !== GamePhase.REVEAL) return currentState;
              return { ...currentState, phase: GamePhase.IMPOSTER_GUESS };
 
         case 'SUBMIT_GUESS':
+             if (currentState.phase !== GamePhase.IMPOSTER_GUESS) return currentState;
              audioService.playSfx('pop');
              return { ...currentState, imposterGuess: action.guess, phase: GamePhase.HOST_REVIEW };
 
         case 'JUDGE_GUESS': {
+            if (currentState.phase !== GamePhase.HOST_REVIEW) return currentState;
             if (action.isCorrect) audioService.playSfx('success');
             else audioService.playSfx('danger');
             const imposter = currentState.players.find(p => p.isImposter);
@@ -399,8 +487,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         case 'ACK_ROUND_END': {
+             if (currentState.phase !== GamePhase.ROLE_REVEAL && currentState.phase !== GamePhase.SCOREBOARD) return currentState;
              audioService.playSfx('click');
-             const updatedPlayers = currentState.players.map(p => (p.id === action.playerId) ? { ...p, isReady: !p.isReady } : p);
+             const updatedPlayers = currentState.players.map(p => (p.id === action.playerId) ? { ...p, isReady: true } : p);
              const readyPlayers = updatedPlayers.filter(p => p.isReady || p.isBot || p.isDisconnected);
              if (readyPlayers.length === updatedPlayers.length) {
                 if (currentState.phase === GamePhase.ROLE_REVEAL) {
@@ -426,117 +515,183 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         
         case 'RESET_GAME':
-             return { ...INITIAL_STATE, gameCode: currentState.gameCode, phase: GamePhase.LOBBY, players: [] };
+             return {
+                 ...INITIAL_STATE,
+                 gameCode: currentState.gameCode,
+                 phase: GamePhase.LOBBY,
+                 // Keep the existing PeerJS room and crew connected so
+                 // PLAY AGAIN is a real lobby reset instead of an empty room.
+                 players: currentState.players.map(p => ({
+                     ...p,
+                     isHost: false,
+                     isImposter: false,
+                     isReady: false,
+                     isDisconnected: false,
+                     score: 0,
+                     voteCount: 0
+                 }))
+             };
         default:
             return currentState;
     }
   };
 
+  const applyHostAction = (action: GameAction) => {
+    const processed = processAction(action, stateRef.current);
+    // Invalid or duplicate packets are intentionally ignored. This is vital
+    // after a browser briefly reconnects and replays a click.
+    if (processed === stateRef.current) return;
+    const nextState = { ...processed, syncVersion: stateRef.current.syncVersion + 1 };
+    stateRef.current = nextState;
+    setState(nextState);
+    broadcastState(nextState);
+  };
+
   const dispatch = (action: GameAction) => {
-    if (isHost) {
-        const newState = processAction(action, state);
-        setState(newState);
-        broadcastState(newState);
-    } else if (hostConnRef.current && hostConnRef.current.open) {
-        hostConnRef.current.send(action);
-    }
+    if (isHost) applyHostAction(action);
+    else if (hostConnRef.current?.open) hostConnRef.current.send(action);
+  };
+
+  const handleHostConnection = (conn: DataConnection) => {
+    connectionsRef.current.push(conn);
+    conn.on('open', () => conn.send({ type: 'SYNC_STATE', state: stateRef.current }));
+    conn.on('data', (data: unknown) => {
+      const message = data as { type?: string };
+      if (message?.type === 'JOIN_REQUEST' && stateRef.current.phase !== GamePhase.LOBBY) {
+        const player = (data as Extract<GameAction, { type: 'JOIN_REQUEST' }>).player;
+        if (!stateRef.current.players.some(existing => existing.id === player.id)) {
+          conn.send({ type: 'JOIN_REJECTED', message: 'This game is already in progress.' });
+          return;
+        }
+      }
+      if (message?.type !== 'SYNC_STATE') applyHostAction(data as GameAction);
+    });
+    conn.on('close', () => {
+      connectionsRef.current = connectionsRef.current.filter(candidate => candidate !== conn);
+      const playerId = (conn as any).metadata?.playerId as string | undefined;
+      const hasAnotherConnection = playerId && connectionsRef.current.some(candidate => candidate.open && (candidate as any).metadata?.playerId === playerId);
+      if (playerId && !hasAnotherConnection) applyHostAction({ type: 'PLAYER_DISCONNECTED', playerId });
+    });
+  };
+
+  const rememberPlayer = (name: string, avatarUrl?: string) => {
+    sessionStorage.setItem('imposter_playerName', name);
+    if (avatarUrl) sessionStorage.setItem('imposter_avatarUrl', avatarUrl);
+  };
+
+  const connectToHost = (code: string, player: Player, onReady?: () => void, onFailure?: (error: Error) => void) => {
+    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+    if (peerRef.current) peerRef.current.destroy();
+    hostConnRef.current = null;
+    expectedRoomRef.current = code.toUpperCase();
+    setConnectionStatus('reconnecting');
+    const peer = new Peer({ debug: 1, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
+    peerRef.current = peer;
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      setConnectionStatus('offline');
+      onFailure?.(error);
+    };
+    const timeout = setTimeout(() => fail(new Error('Game session not found or timed out.')), 20000);
+    peer.on('open', () => {
+      const conn = peer.connect(PEER_PREFIX + code.toUpperCase(), { reliable: true, metadata: { playerId: player.id } });
+      conn.on('open', () => {
+        clearTimeout(timeout);
+        settled = true;
+        hostConnRef.current = conn;
+        setIsHost(false);
+        setMyPlayerId(player.id);
+        setConnectionStatus('connected');
+        // Re-registering is what clears the host's disconnected marker and
+        // guarantees a fresh snapshot after a reload.
+        conn.send({ type: 'JOIN_REQUEST', player });
+        onReady?.();
+      });
+      conn.on('data', (data: unknown) => {
+        const message = data as { type?: string; state?: GameState; message?: string };
+        if (message?.type === 'SYNC_STATE' && message.state) acceptSnapshot(message.state);
+        if (message?.type === 'JOIN_REJECTED') {
+          hostConnRef.current = null;
+          conn.close();
+          expectedRoomRef.current = null;
+          stateRef.current = INITIAL_STATE;
+          setState(INITIAL_STATE);
+          setConnectionStatus('offline');
+          onFailure?.(new Error(message.message || 'This game is already in progress.'));
+        }
+      });
+      conn.on('close', () => {
+        if (hostConnRef.current !== conn || !stateRef.current.gameCode) return;
+        setConnectionStatus('reconnecting');
+        reconnectTimerRef.current = setTimeout(() => reconnectGame(code, player.id), 1200);
+      });
+      conn.on('error', () => fail(new Error('Connection lost.')));
+    });
+    peer.on('error', (err) => fail(new Error(err.type === 'peer-unavailable' ? "Room doesn't exist." : 'Network error.')));
   };
 
   const createGame = (name: string, avatarUrl?: string) => {
     audioService.playMusic();
     return new Promise<void>((resolve, reject) => {
-        if (peerRef.current) peerRef.current.destroy();
-        const code = Math.random().toString(36).substring(2, 7).toUpperCase();
-        const playerId = Math.random().toString(36).substr(2, 9);
-        const peer = new Peer(PEER_PREFIX + code, { debug: 1, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
-        peer.on('open', () => {
-            setIsHost(true);
-            setMyPlayerId(playerId);
-            const creatorPlayer: Player = { id: playerId, name, avatarSeed: Math.random().toString(), avatarUrl, isHost: false, isImposter: false, isBot: false, score: 0, voteCount: 0, isReady: false };
-            setState({ ...INITIAL_STATE, gameCode: code, phase: GamePhase.LOBBY, players: [creatorPlayer] });
-            peerRef.current = peer;
-            resolve();
-        });
-        peer.on('error', (err) => reject(new Error(err.type === 'unavailable-id' ? "Room code busy." : "Network server error.")));
-        peer.on('connection', (conn) => {
-            connectionsRef.current.push(conn);
-            conn.on('open', () => conn.send({ type: 'SYNC_STATE', state: state }));
-            conn.on('data', (data: any) => {
-                setState(current => {
-                    const updated = processAction(data as GameAction, current);
-                    connectionsRef.current.forEach(c => { if (c.open) c.send({ type: 'SYNC_STATE', state: updated }); });
-                    return updated;
-                });
-            });
-            conn.on('close', () => {
-                connectionsRef.current = connectionsRef.current.filter(c => c !== conn);
-                // Mark player as disconnected in the state
-                const playerMeta = (conn as any).metadata?.playerId;
-                if (playerMeta) {
-                    dispatch({ type: 'PLAYER_DISCONNECTED', playerId: playerMeta });
-                }
-            });
-        });
+      if (peerRef.current) peerRef.current.destroy();
+      const code = Math.random().toString(36).substring(2, 7).toUpperCase();
+      const playerId = Math.random().toString(36).substr(2, 9);
+      const peer = new Peer(PEER_PREFIX + code, { debug: 1, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
+      peerRef.current = peer;
+      expectedRoomRef.current = code;
+      peer.on('open', () => {
+        const creatorPlayer: Player = { id: playerId, name, avatarSeed: Math.random().toString(), avatarUrl, isHost: false, isImposter: false, isBot: false, score: 0, voteCount: 0, isReady: false };
+        const nextState = { ...INITIAL_STATE, gameCode: code, phase: GamePhase.LOBBY, players: [creatorPlayer] };
+        stateRef.current = nextState;
+        setState(nextState);
+        setIsHost(true);
+        setMyPlayerId(playerId);
+        setConnectionStatus('connected');
+        rememberPlayer(name, avatarUrl);
+        resolve();
+      });
+      peer.on('error', (err) => reject(new Error(err.type === 'unavailable-id' ? 'Room code busy.' : 'Network server error.')));
+      peer.on('connection', handleHostConnection);
     });
   };
 
-  const joinGame = (code: string, name: string, avatarUrl?: string) => {
+  const joinGame = (code: string, name: string, avatarUrl?: string) => new Promise<void>((resolve, reject) => {
     audioService.playMusic();
-    return new Promise<void>((resolve, reject) => {
-        if (peerRef.current) peerRef.current.destroy();
-        const playerId = sessionStorage.getItem('imposter_playerId') || Math.random().toString(36).substr(2, 9);
-        const peer = new Peer({ debug: 1, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } }); 
-        const timeout = setTimeout(() => { peer.destroy(); reject(new Error("Game session not found or timed out.")); }, 120000);
-        peer.on('open', () => {
-            const conn = peer.connect(PEER_PREFIX + code.toUpperCase(), { 
-                reliable: true,
-                metadata: { playerId }
-            });
-            conn.on('open', () => {
-                clearTimeout(timeout);
-                hostConnRef.current = conn;
-                setIsHost(false);
-                setMyPlayerId(playerId);
-                peerRef.current = peer;
-                const player: Player = { id: playerId, name, avatarSeed: Math.random().toString(), avatarUrl: avatarUrl, isHost: false, isImposter: false, isBot: false, score: 0, voteCount: 0, isReady: false };
-                conn.send({ type: 'JOIN_REQUEST', player });
-                resolve();
-            });
-            conn.on('data', (data: any) => { if (data.type === 'SYNC_STATE') setState(data.state); });
-            conn.on('error', (err) => { clearTimeout(timeout); reject(new Error("Connection lost.")); });
-        });
-        peer.on('error', (err) => { clearTimeout(timeout); reject(new Error(err.type === 'peer-unavailable' ? "Room doesn't exist." : "Network error.")); });
-    });
-  };
+    const playerId = sessionStorage.getItem('imposter_playerId') || Math.random().toString(36).substr(2, 9);
+    const player: Player = { id: playerId, name, avatarSeed: Math.random().toString(), avatarUrl, isHost: false, isImposter: false, isBot: false, score: 0, voteCount: 0, isReady: false };
+    rememberPlayer(name, avatarUrl);
+    connectToHost(code, player, resolve, reject);
+  });
 
   const reconnectGame = (code: string, playerId: string) => {
-      audioService.playMusic();
-      if (peerRef.current) peerRef.current.destroy();
-      const peer = new Peer({ debug: 1, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
-      peer.on('open', () => {
-          const conn = peer.connect(PEER_PREFIX + code.toUpperCase(), { 
-              reliable: true,
-              metadata: { playerId }
-          });
-          conn.on('open', () => {
-              hostConnRef.current = conn;
-              setIsHost(false);
-              setMyPlayerId(playerId);
-              peerRef.current = peer;
-              conn.on('data', (data: any) => { if (data.type === 'SYNC_STATE') setState(data.state); });
-          });
-      });
+    audioService.playMusic();
+    const player: Player = {
+      id: playerId,
+      name: sessionStorage.getItem('imposter_playerName') || '',
+      avatarSeed: Math.random().toString(),
+      avatarUrl: sessionStorage.getItem('imposter_avatarUrl') || undefined,
+      isHost: false, isImposter: false, isBot: false, score: 0, voteCount: 0, isReady: false
+    };
+    connectToHost(code, player);
   };
 
   const leaveGame = () => {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (peerRef.current) peerRef.current.destroy();
       hostConnRef.current = null;
       connectionsRef.current = [];
+      expectedRoomRef.current = null;
       setIsHost(false);
       setMyPlayerId(null);
+      setConnectionStatus('offline');
+      stateRef.current = INITIAL_STATE;
       setState(INITIAL_STATE);
       sessionStorage.removeItem('imposter_gameCode');
       sessionStorage.removeItem('imposter_playerId');
+      sessionStorage.removeItem('imposter_playerName');
+      sessionStorage.removeItem('imposter_avatarUrl');
   };
 
   const handlePlayerRecovery = (playerId: string, action: 'KICK' | 'AI') => {
@@ -553,7 +708,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const startVoting = () => dispatch({ type: 'START_VOTING' });
   const confirmPassDevice = () => { };
   const startImposterGuess = () => dispatch({ type: 'START_IMPOSTER_GUESS' });
-  const submitClue = (text: string) => dispatch({ type: 'SUBMIT_CLUE', text });
+  const submitClue = (text: string) => myPlayerId && dispatch({ type: 'SUBMIT_CLUE', playerId: myPlayerId, text });
   const submitVote = (voterId: string, votedForId: string) => dispatch({ type: 'SUBMIT_VOTE', voterId, votedForId });
   const submitImposterGuess = (guess: string) => dispatch({ type: 'SUBMIT_GUESS', guess });
   const judgeImposterGuess = (isCorrect: boolean) => dispatch({ type: 'JUDGE_GUESS', isCorrect });
@@ -564,7 +719,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return (
     <GameContext.Provider value={{
-      state, isHost, isNetworkHost: isHost, myPlayerId, amIGameHost, createGame, joinGame, reconnectGame, leaveGame, updateConfig, startGame, setTopic, submitClue, submitVote, submitImposterGuess, judgeImposterGuess, acknowledgeRoundEnd, resetGame, addBot, confirmPassDevice,
+      state, isHost, isNetworkHost: isHost, connectionStatus, myPlayerId, amIGameHost, createGame, joinGame, reconnectGame, leaveGame, updateConfig, startGame, setTopic, submitClue, submitVote, submitImposterGuess, judgeImposterGuess, acknowledgeRoundEnd, resetGame, addBot, confirmPassDevice,
       finishRoleReveal, startVoting, confirmStarter, startImposterGuess, handlePlayerRecovery
     }}>
       {children}
