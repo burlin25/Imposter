@@ -2,6 +2,12 @@
 
 A multiplayer social deduction game by [burlin25](https://github.com/burlin25). Give clues, read the room, and find the player who doesn't know the secret topic.
 
+## Play Online
+
+Once GitHub Pages finishes its first deployment, play the latest version here:
+
+[Play Imposter](https://burlin25.github.io/Imposter/)
+
 ## How to Play
 
 1. Create a room and share its code with friends. You need at least four players, including the moderator; bots can fill open spots.
