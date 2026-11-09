@@ -2,6 +2,8 @@
 class AudioService {
   private music: HTMLAudioElement | null = null;
   private ctx: AudioContext | null = null;
+  private masterGain: GainNode | null = null;
+  private compressor: DynamicsCompressorNode | null = null;
   private isMusicMuted: boolean = false;
   private isSfxMuted: boolean = false;
   private isStarted: boolean = false;
@@ -20,6 +22,16 @@ class AudioService {
   private async initContext() {
     if (!this.ctx) {
       this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.value = 0.75;
+      this.compressor = this.ctx.createDynamicsCompressor();
+      this.compressor.threshold.value = -18;
+      this.compressor.knee.value = 20;
+      this.compressor.ratio.value = 8;
+      this.compressor.attack.value = 0.003;
+      this.compressor.release.value = 0.25;
+      this.masterGain.connect(this.compressor);
+      this.compressor.connect(this.ctx.destination);
     }
     if (this.ctx.state === 'suspended') {
       await this.ctx.resume();
@@ -93,80 +105,104 @@ class AudioService {
     }
   }
 
-  async playSfx(type: 'click' | 'success' | 'danger' | 'pop' | 'reveal' | 'vote' | 'transition') {
+  private playTone(
+    frequency: number,
+    start: number,
+    duration: number,
+    volume: number,
+    type: OscillatorType = 'sine',
+    endFrequency = frequency,
+  ) {
+    if (!this.ctx || !this.masterGain) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(frequency, start);
+    if (endFrequency !== frequency) {
+      osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFrequency), start + duration);
+    }
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(volume, start + Math.min(0.015, duration / 4));
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(start);
+    osc.stop(start + duration + 0.02);
+  }
+
+  private playNoise(start: number, duration: number, volume: number, filterFrequency: number) {
+    if (!this.ctx || !this.masterGain) return;
+    const bufferLength = Math.max(1, Math.floor(this.ctx.sampleRate * duration));
+    const buffer = this.ctx.createBuffer(1, bufferLength, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferLength; i += 1) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    const source = this.ctx.createBufferSource();
+    const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(filterFrequency, start);
+    gain.gain.setValueAtTime(volume, start);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    source.buffer = buffer;
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    source.start(start);
+    source.stop(start + duration + 0.02);
+  }
+
+  async playSfx(type: 'click' | 'success' | 'danger' | 'pop' | 'reveal' | 'vote' | 'transition' | 'join' | 'countdown' | 'win') {
     if (this.isSfxMuted) return;
     await this.initContext();
     if (!this.ctx) return;
-
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
     const now = this.ctx.currentTime;
 
     switch(type) {
       case 'click':
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(1500, now);
-        osc.frequency.exponentialRampToValueAtTime(600, now + 0.02);
-        gain.gain.setValueAtTime(0.05, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.02);
-        osc.start(now);
-        osc.stop(now + 0.02);
+        this.playTone(1500, now, 0.025, 0.045, 'square', 650);
+        this.playTone(2200, now + 0.012, 0.035, 0.02, 'sine', 1400);
         break;
       case 'pop':
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(400, now);
-        osc.frequency.exponentialRampToValueAtTime(900, now + 0.05);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
-        osc.start(now);
-        osc.stop(now + 0.08);
+        this.playTone(320, now, 0.09, 0.08, 'sine', 900);
+        this.playNoise(now, 0.045, 0.025, 2600);
         break;
       case 'vote':
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(300, now);
-        osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
-        osc.start(now);
-        osc.stop(now + 0.2);
+        this.playTone(340, now, 0.18, 0.07, 'triangle', 90);
+        this.playTone(680, now + 0.04, 0.12, 0.035, 'sine', 180);
         break;
       case 'reveal':
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(100, now);
-        osc.frequency.exponentialRampToValueAtTime(40, now + 1.2);
-        gain.gain.setValueAtTime(0.3, now);
-        gain.gain.linearRampToValueAtTime(0, now + 1.2);
-        osc.start(now);
-        osc.stop(now + 1.2);
+        this.playTone(80, now, 1.1, 0.09, 'sawtooth', 42);
+        this.playTone(220, now + 0.18, 0.9, 0.06, 'sine', 880);
+        this.playTone(330, now + 0.22, 0.75, 0.035, 'sine', 1320);
+        this.playNoise(now, 0.7, 0.018, 1800);
         break;
       case 'success':
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(523, now);
-        osc.frequency.setValueAtTime(659, now + 0.08);
-        osc.frequency.setValueAtTime(783, now + 0.16);
-        gain.gain.setValueAtTime(0.08, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
-        osc.start(now);
-        osc.stop(now + 0.4);
+        [523, 659, 784, 1047].forEach((frequency, index) => {
+          this.playTone(frequency, now + index * 0.07, 0.42, 0.055, 'sine');
+        });
         break;
       case 'danger':
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(120, now);
-        gain.gain.setValueAtTime(0.08, now);
-        gain.gain.linearRampToValueAtTime(0, now + 0.3);
-        osc.start(now);
-        osc.stop(now + 0.3);
+        this.playTone(130, now, 0.42, 0.075, 'sawtooth', 55);
+        this.playTone(92, now + 0.18, 0.4, 0.055, 'square', 42);
+        this.playNoise(now, 0.3, 0.022, 900);
         break;
       case 'transition':
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(200, now);
-        osc.frequency.exponentialRampToValueAtTime(800, now + 0.5);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-        osc.start(now);
-        osc.stop(now + 0.5);
+        this.playTone(180, now, 0.55, 0.065, 'sine', 720);
+        this.playTone(360, now + 0.08, 0.48, 0.035, 'triangle', 1440);
+        break;
+      case 'join':
+        this.playTone(392, now, 0.12, 0.05, 'sine');
+        this.playTone(659, now + 0.1, 0.22, 0.06, 'sine');
+        break;
+      case 'countdown':
+        this.playTone(880, now, 0.08, 0.055, 'square');
+        break;
+      case 'win':
+        [392, 494, 587, 784, 988].forEach((frequency, index) => {
+          this.playTone(frequency, now + index * 0.09, 0.5, 0.06, 'sine');
+        });
         break;
     }
   }
