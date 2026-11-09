@@ -1,18 +1,14 @@
-
 class AudioService {
-  private music: HTMLAudioElement | null = null;
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private compressor: DynamicsCompressorNode | null = null;
-  private isMusicMuted: boolean = false;
-  private isSfxMuted: boolean = false;
-  private isStarted: boolean = false;
-  
-  // High-quality chill mystery theme
-  private musicUrl: string = 'https://cdn.pixabay.com/audio/2022/03/10/audio_c352c1bdc2.mp3'; // Lofi chill track
-  private lobbyMusicUrl: string = 'https://cdn.pixabay.com/audio/2022/01/21/audio_31743c589f.mp3'; // More upbeat lobby track
-
-  private currentMusic: HTMLAudioElement | null = null;
+  private musicGain: GainNode | null = null;
+  private musicTimer: number | null = null;
+  private musicType: 'lobby' | 'game' = 'lobby';
+  private musicStep = 0;
+  private isMusicMuted = false;
+  private isSfxMuted = false;
+  private isStarted = false;
 
   constructor() {
     this.isMusicMuted = localStorage.getItem('game_music_muted') === 'true';
@@ -23,35 +19,36 @@ class AudioService {
     if (!this.ctx) {
       this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = 0.75;
+      this.masterGain.gain.value = 0.82;
       this.compressor = this.ctx.createDynamicsCompressor();
-      this.compressor.threshold.value = -18;
-      this.compressor.knee.value = 20;
-      this.compressor.ratio.value = 8;
-      this.compressor.attack.value = 0.003;
-      this.compressor.release.value = 0.25;
+      this.compressor.threshold.value = -20;
+      this.compressor.knee.value = 24;
+      this.compressor.ratio.value = 5;
+      this.compressor.attack.value = 0.01;
+      this.compressor.release.value = 0.3;
       this.masterGain.connect(this.compressor);
       this.compressor.connect(this.ctx.destination);
     }
-    if (this.ctx.state === 'suspended') {
-      await this.ctx.resume();
-    }
+    if (this.ctx.state === 'suspended') await this.ctx.resume();
   }
 
   async unlock() {
-    if (this.isStarted) return;
     await this.initContext();
-    await this.playMusic('lobby');
-    this.isStarted = true;
-    console.debug("Audio System Unlocked");
+    if (!this.isStarted) {
+      this.isStarted = true;
+      await this.playMusic('lobby');
+    }
   }
 
   toggleMusicMute(): boolean {
     this.isMusicMuted = !this.isMusicMuted;
     localStorage.setItem('game_music_muted', String(this.isMusicMuted));
-    if (this.currentMusic) {
-      this.currentMusic.muted = this.isMusicMuted;
-      if (!this.isMusicMuted) this.currentMusic.play().catch(() => {});
+    if (this.musicGain && this.ctx) {
+      const now = this.ctx.currentTime;
+      this.musicGain.gain.cancelScheduledValues(now);
+      this.musicGain.gain.setTargetAtTime(this.isMusicMuted ? 0.0001 : 0.1, now, 0.08);
+    } else if (!this.isMusicMuted && this.isStarted) {
+      this.playMusic(this.musicType);
     }
     return this.isMusicMuted;
   }
@@ -65,44 +62,53 @@ class AudioService {
   getMusicMuted(): boolean { return this.isMusicMuted; }
   getSfxMuted(): boolean { return this.isSfxMuted; }
 
+  private stopMusic() {
+    if (this.musicTimer !== null) {
+      window.clearTimeout(this.musicTimer);
+      this.musicTimer = null;
+    }
+    if (this.musicGain && this.ctx) {
+      const oldGain = this.musicGain;
+      const now = this.ctx.currentTime;
+      oldGain.gain.cancelScheduledValues(now);
+      oldGain.gain.setTargetAtTime(0.0001, now, 0.12);
+      window.setTimeout(() => oldGain.disconnect(), 600);
+      this.musicGain = null;
+    }
+  }
+
   async playMusic(type: 'lobby' | 'game' = 'game') {
-    const url = type === 'lobby' ? this.lobbyMusicUrl : this.musicUrl;
-    
-    if (this.currentMusic) {
-      if (this.currentMusic.src === url) {
-        if (!this.isMusicMuted && this.currentMusic.paused) {
-          this.currentMusic.play().catch(() => {});
-        }
-        return;
-      }
-      // Fade out current music
-      const oldMusic = this.currentMusic;
-      let vol = oldMusic.volume;
-      const fadeOut = setInterval(() => {
-        vol -= 0.05;
-        if (vol <= 0) {
-          clearInterval(fadeOut);
-          oldMusic.pause();
-        } else {
-          oldMusic.volume = vol;
-        }
-      }, 50);
-    }
-    
-    this.currentMusic = new Audio(url);
-    this.currentMusic.loop = true;
-    this.currentMusic.volume = 0.2;
-    this.currentMusic.muted = this.isMusicMuted;
-    this.currentMusic.crossOrigin = "anonymous";
-    
-    console.debug(`Attempting to play music: ${type} (${url})`);
-    
-    try {
-      await this.currentMusic.play();
-      console.debug("Music playback started successfully");
-    } catch (e) {
-      console.warn("Music playback failed or was blocked:", e);
-    }
+    await this.initContext();
+    this.musicType = type;
+    if (this.isMusicMuted || !this.ctx || !this.masterGain) return;
+    if (this.musicGain) this.stopMusic();
+
+    this.musicStep = 0;
+    this.musicGain = this.ctx.createGain();
+    this.musicGain.gain.setValueAtTime(0.0001, this.ctx.currentTime);
+    this.musicGain.gain.exponentialRampToValueAtTime(type === 'lobby' ? 0.11 : 0.08, this.ctx.currentTime + 0.8);
+    this.musicGain.connect(this.masterGain);
+    this.scheduleMusicBar();
+  }
+
+  private scheduleMusicBar() {
+    if (!this.ctx || !this.musicGain || this.isMusicMuted) return;
+    const now = this.ctx.currentTime + 0.04;
+    const lobbyRoots = [220, 261.63, 293.66, 246.94];
+    const gameRoots = [110, 123.47, 146.83, 98];
+    const roots = this.musicType === 'lobby' ? lobbyRoots : gameRoots;
+    const root = roots[this.musicStep % roots.length];
+    const chord = [root, root * 1.25, root * 1.5];
+
+    chord.forEach((frequency, index) => {
+      this.playTone(frequency, now + index * 0.03, 2.05, 0.024, 'sine', frequency * 0.98, this.musicGain);
+    });
+    [root * 2, root * 2.5, root * 3, root * 2.5].forEach((frequency, index) => {
+      this.playTone(frequency, now + 0.25 + index * 0.42, 0.22, 0.016, 'triangle', frequency * 0.92, this.musicGain);
+    });
+
+    this.musicStep += 1;
+    this.musicTimer = window.setTimeout(() => this.scheduleMusicBar(), 1900);
   }
 
   private playTone(
@@ -112,8 +118,9 @@ class AudioService {
     volume: number,
     type: OscillatorType = 'sine',
     endFrequency = frequency,
+    destination: AudioNode | null = this.masterGain,
   ) {
-    if (!this.ctx || !this.masterGain) return;
+    if (!this.ctx || !destination) return;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = type;
@@ -122,12 +129,12 @@ class AudioService {
       osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFrequency), start + duration);
     }
     gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(volume, start + Math.min(0.015, duration / 4));
+    gain.gain.exponentialRampToValueAtTime(volume, start + Math.min(0.025, duration / 4));
     gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
     osc.connect(gain);
-    gain.connect(this.masterGain);
+    gain.connect(destination);
     osc.start(start);
-    osc.stop(start + duration + 0.02);
+    osc.stop(start + duration + 0.03);
   }
 
   private playNoise(start: number, duration: number, volume: number, filterFrequency: number) {
@@ -135,9 +142,7 @@ class AudioService {
     const bufferLength = Math.max(1, Math.floor(this.ctx.sampleRate * duration));
     const buffer = this.ctx.createBuffer(1, bufferLength, this.ctx.sampleRate);
     const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferLength; i += 1) {
-      data[i] = Math.random() * 2 - 1;
-    }
+    for (let i = 0; i < bufferLength; i += 1) data[i] = Math.random() * 2 - 1;
     const source = this.ctx.createBufferSource();
     const filter = this.ctx.createBiquadFilter();
     const gain = this.ctx.createGain();
@@ -150,7 +155,7 @@ class AudioService {
     filter.connect(gain);
     gain.connect(this.masterGain);
     source.start(start);
-    source.stop(start + duration + 0.02);
+    source.stop(start + duration + 0.03);
   }
 
   async playSfx(type: 'click' | 'success' | 'danger' | 'pop' | 'reveal' | 'vote' | 'transition' | 'join' | 'countdown' | 'win') {
@@ -159,49 +164,46 @@ class AudioService {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
 
-    switch(type) {
+    switch (type) {
       case 'click':
-        this.playTone(1500, now, 0.025, 0.045, 'square', 650);
-        this.playTone(2200, now + 0.012, 0.035, 0.02, 'sine', 1400);
+        this.playTone(900, now, 0.045, 0.022, 'sine', 620);
         break;
       case 'pop':
-        this.playTone(320, now, 0.09, 0.08, 'sine', 900);
-        this.playNoise(now, 0.045, 0.025, 2600);
+        this.playTone(280, now, 0.11, 0.04, 'sine', 620);
         break;
       case 'vote':
-        this.playTone(340, now, 0.18, 0.07, 'triangle', 90);
-        this.playTone(680, now + 0.04, 0.12, 0.035, 'sine', 180);
+        this.playTone(330, now, 0.2, 0.035, 'triangle', 110);
+        this.playTone(660, now + 0.05, 0.13, 0.018, 'sine', 220);
         break;
       case 'reveal':
-        this.playTone(80, now, 1.1, 0.09, 'sawtooth', 42);
-        this.playTone(220, now + 0.18, 0.9, 0.06, 'sine', 880);
-        this.playTone(330, now + 0.22, 0.75, 0.035, 'sine', 1320);
-        this.playNoise(now, 0.7, 0.018, 1800);
+        this.playTone(90, now, 0.9, 0.05, 'sine', 48);
+        this.playTone(220, now + 0.16, 0.75, 0.035, 'sine', 660);
+        this.playNoise(now, 0.45, 0.008, 1200);
         break;
       case 'success':
-        [523, 659, 784, 1047].forEach((frequency, index) => {
-          this.playTone(frequency, now + index * 0.07, 0.42, 0.055, 'sine');
+        [523, 659, 784].forEach((frequency, index) => {
+          this.playTone(frequency, now + index * 0.08, 0.35, 0.035, 'sine');
         });
         break;
       case 'danger':
-        this.playTone(130, now, 0.42, 0.075, 'sawtooth', 55);
-        this.playTone(92, now + 0.18, 0.4, 0.055, 'square', 42);
-        this.playNoise(now, 0.3, 0.022, 900);
+        this.playTone(120, now, 0.36, 0.04, 'triangle', 65);
+        this.playTone(90, now + 0.14, 0.28, 0.028, 'sine', 48);
+        this.playNoise(now, 0.2, 0.008, 650);
         break;
       case 'transition':
-        this.playTone(180, now, 0.55, 0.065, 'sine', 720);
-        this.playTone(360, now + 0.08, 0.48, 0.035, 'triangle', 1440);
+        this.playTone(180, now, 0.5, 0.035, 'sine', 540);
+        this.playTone(360, now + 0.08, 0.4, 0.018, 'triangle', 900);
         break;
       case 'join':
-        this.playTone(392, now, 0.12, 0.05, 'sine');
-        this.playTone(659, now + 0.1, 0.22, 0.06, 'sine');
+        this.playTone(392, now, 0.14, 0.03, 'sine');
+        this.playTone(659, now + 0.1, 0.2, 0.04, 'sine');
         break;
       case 'countdown':
-        this.playTone(880, now, 0.08, 0.055, 'square');
+        this.playTone(660, now, 0.08, 0.03, 'sine');
         break;
       case 'win':
-        [392, 494, 587, 784, 988].forEach((frequency, index) => {
-          this.playTone(frequency, now + index * 0.09, 0.5, 0.06, 'sine');
+        [392, 494, 587, 784].forEach((frequency, index) => {
+          this.playTone(frequency, now + index * 0.09, 0.42, 0.04, 'sine');
         });
         break;
     }
