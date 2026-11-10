@@ -85,7 +85,7 @@ export const TopicSelectionScreen: React.FC = () => {
   const potentialImposters = state.players.filter(p => !p.isHost);
 
   return (
-    <div className="h-[100dvh] bg-game-bg flex flex-col items-center justify-center px-6 pt-[calc(env(safe-area-inset-top,0px)+4.5rem)] pb-[max(1rem,env(safe-area-inset-bottom,0px))] sm:pt-6">
+    <div className="mission-briefing h-[100dvh] bg-game-bg flex flex-col items-center justify-center px-6 pb-[max(1rem,env(safe-area-inset-bottom,0px))] sm:pt-6">
        <AnimatePresence>
         {showCamera && (
                 <Camera 

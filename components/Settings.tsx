@@ -53,7 +53,7 @@ export const Settings: React.FC = () => {
   };
 
   return (
-    <div className="fixed top-[calc(env(safe-area-inset-top,0px)+1rem)] right-[calc(env(safe-area-inset-right,0px)+1rem)] z-[100]">
+    <div className="game-settings fixed z-[100]">
       <div className="relative">
         <motion.button 
           whileHover={{ scale: 1.1 }}

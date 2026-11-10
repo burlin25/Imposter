@@ -3,9 +3,9 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="mobile-web-app-capable" content="yes">
     <title>Imposter Word Game</title>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -76,6 +76,18 @@
       }
     </script>
     <style>
+      :root {
+        --game-top-inset: env(safe-area-inset-top, 0px);
+      }
+      .game-settings {
+        top: calc(var(--game-top-inset) + 1rem);
+        right: calc(env(safe-area-inset-right, 0px) + 1rem);
+      }
+      @media (max-width: 639px) {
+        .mission-briefing {
+          padding-top: calc(var(--game-top-inset) + 4.5rem);
+        }
+      }
       body {
         background: linear-gradient(-45deg, #0f172a, #1e1b4b, #2e1065, #000000);
         background-size: 400% 400%;
