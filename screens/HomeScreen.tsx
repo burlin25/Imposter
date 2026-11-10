@@ -129,7 +129,7 @@ export const HomeScreen: React.FC = () => {
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!joinCode || !playerName || !avatarUrl) return;
+    if (!joinCode || !playerName) return;
     setIsConnecting(true);
     setErrorMsg('');
     try {
@@ -142,7 +142,7 @@ export const HomeScreen: React.FC = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!playerName || !avatarUrl) return;
+    if (!playerName) return;
     setIsConnecting(true);
     setErrorMsg('');
     try {
@@ -278,6 +278,7 @@ export const HomeScreen: React.FC = () => {
                     <div className={`w-32 h-32 rounded-full flex items-center justify-center overflow-hidden relative transition-all ${!avatarUrl ? 'border-2 border-indigo-500/50 border-dashed' : 'shadow-[0_0_20px_rgba(99,102,241,0.3)] scale-105'}`}>
                         {avatarUrl ? <img src={avatarUrl} alt="Preview" className="w-full h-full object-cover" /> : <Users size={48} className="text-slate-600" />}
                     </div>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-widest">Picture optional — a generated avatar is used if skipped</p>
                     <div className="flex gap-2 w-full">
                         <Button type="button" variant="secondary" className="flex-1 py-2 text-[10px] font-black uppercase tracking-widest" onClick={() => handleAction(() => fileInputRef.current?.click())}>
                             <div className="flex items-center justify-center gap-2">
@@ -320,7 +321,7 @@ export const HomeScreen: React.FC = () => {
                             Back
                         </div>
                     </Button>
-                    <Button type="submit" className="flex-1 shadow-indigo-500/20 shadow-lg" disabled={!playerName || !avatarUrl || (view === 'JOIN' && !joinCode)}>
+                    <Button type="submit" className="flex-1 shadow-indigo-500/20 shadow-lg" disabled={!playerName || (view === 'JOIN' && !joinCode)}>
                         Enter
                     </Button>
                 </div>

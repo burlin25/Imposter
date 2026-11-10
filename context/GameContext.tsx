@@ -50,6 +50,10 @@ const INITIAL_STATE: GameState = {
 };
 
 const PEER_PREFIX = 'imposter-deduction-v3-stable-';
+const ICE_SERVERS = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+  { urls: 'stun:global.stun.twilio.com:3478' }
+];
 
 export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, setState] = useState<GameState>(INITIAL_STATE);
@@ -577,6 +581,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const rememberPlayer = (name: string, avatarUrl?: string) => {
     sessionStorage.setItem('imposter_playerName', name);
     if (avatarUrl) sessionStorage.setItem('imposter_avatarUrl', avatarUrl);
+    else sessionStorage.removeItem('imposter_avatarUrl');
   };
 
   const connectToHost = (code: string, player: Player, onReady?: () => void, onFailure?: (error: Error) => void) => {
@@ -585,7 +590,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     hostConnRef.current = null;
     expectedRoomRef.current = code.toUpperCase();
     setConnectionStatus('reconnecting');
-    const peer = new Peer({ debug: 1, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
+    const peer = new Peer({ debug: 1, config: { iceServers: ICE_SERVERS } });
     peerRef.current = peer;
     let settled = false;
     const fail = (error: Error) => {
@@ -638,7 +643,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (peerRef.current) peerRef.current.destroy();
       const code = Math.random().toString(36).substring(2, 7).toUpperCase();
       const playerId = Math.random().toString(36).substr(2, 9);
-      const peer = new Peer(PEER_PREFIX + code, { debug: 1, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
+      const peer = new Peer(PEER_PREFIX + code, { debug: 1, config: { iceServers: ICE_SERVERS } });
       peerRef.current = peer;
       expectedRoomRef.current = code;
       peer.on('open', () => {

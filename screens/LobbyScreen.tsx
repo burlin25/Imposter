@@ -99,7 +99,6 @@ export const LobbyScreen: React.FC = () => {
                             <Avatar 
                                 seed={p.avatarSeed} 
                                 url={p.avatarUrl} 
-                                name={p.name} 
                                 size="md" 
                                 className="shadow-2xl"
                             />
