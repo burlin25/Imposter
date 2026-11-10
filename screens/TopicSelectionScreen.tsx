@@ -85,7 +85,7 @@ export const TopicSelectionScreen: React.FC = () => {
   const potentialImposters = state.players.filter(p => !p.isHost);
 
   return (
-    <div className="min-h-screen bg-game-bg flex flex-col items-center justify-center p-6">
+    <div className="h-[100dvh] bg-game-bg flex flex-col items-center justify-center px-6 pt-[calc(env(safe-area-inset-top,0px)+4.5rem)] pb-[max(1rem,env(safe-area-inset-bottom,0px))] sm:pt-6">
        <AnimatePresence>
         {showCamera && (
                 <Camera 
@@ -98,7 +98,7 @@ export const TopicSelectionScreen: React.FC = () => {
        <motion.div 
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="text-center mb-6"
+        className="text-center shrink-0 mb-4 sm:mb-6"
        >
             <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Mission Briefing</h2>
             <p className="text-indigo-400 text-[10px] font-black uppercase tracking-[0.3em]">You are the Commander</p>
@@ -107,7 +107,7 @@ export const TopicSelectionScreen: React.FC = () => {
        <motion.div 
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="w-full max-w-md bg-slate-900/60 backdrop-blur-xl p-6 rounded-[2.5rem] border border-white/10 max-h-[85vh] overflow-y-auto shadow-2xl relative custom-scrollbar"
+        className="w-full max-w-md bg-slate-900/60 backdrop-blur-xl p-5 sm:p-6 rounded-[2.5rem] border border-white/10 min-h-0 max-h-[85dvh] overflow-y-auto shadow-2xl relative custom-scrollbar"
        >
             <form onSubmit={handleSubmit} className="space-y-8">
                 
