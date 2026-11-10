@@ -5,7 +5,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="color-scheme" content="dark">
     <meta name="mobile-web-app-capable" content="yes">
     <title>Imposter Word Game</title>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -77,6 +78,7 @@
     </script>
     <style>
       :root {
+        background-color: #0f172a;
         --game-top-inset: env(safe-area-inset-top, 0px);
       }
       .game-settings {
@@ -89,7 +91,8 @@
         }
       }
       body {
-        background: linear-gradient(-45deg, #0f172a, #1e1b4b, #2e1065, #000000);
+        background-color: #0f172a;
+        background-image: linear-gradient(-45deg, #0f172a, #1e1b4b, #2e1065, #000000);
         background-size: 400% 400%;
         animation: gradientBG 15s ease infinite;
         color: white;
