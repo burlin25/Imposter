@@ -18,7 +18,7 @@ export const TopicSelectionScreen: React.FC = () => {
   const host = state.players.find(p => p.id === state.currentHostId) || state.players[0];
   
   const [inputTopic, setInputTopic] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState(CATEGORIES[0]);
+  const [selectedCategory, setSelectedCategory] = useState('');
   const [topicImage, setTopicImage] = useState<string | undefined>(undefined);
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
@@ -46,7 +46,7 @@ export const TopicSelectionScreen: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (inputTopic.trim()) {
+    if (inputTopic.trim() && selectedCategory) {
       setTopic(inputTopic.trim(), selectedCategory, topicImage, selectedImposters.length > 0 ? selectedImposters : undefined);
     }
   };
@@ -193,9 +193,11 @@ export const TopicSelectionScreen: React.FC = () => {
                     <div className="relative">
                         <select 
                             value={selectedCategory}
+                            required
                             onChange={(e) => setSelectedCategory(e.target.value)}
                             className="w-full bg-black/40 border border-white/10 focus:border-indigo-500/50 p-4 rounded-2xl text-lg text-white font-bold outline-none appearance-none"
                         >
+                            <option value="" disabled>Select a category</option>
                             {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                         <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none opacity-40">
@@ -239,7 +241,7 @@ export const TopicSelectionScreen: React.FC = () => {
                 <Button 
                     type="submit" 
                     fullWidth 
-                    disabled={!inputTopic.trim()} 
+                    disabled={!inputTopic.trim() || !selectedCategory}
                     className="!py-5 shadow-green-500/20 shadow-xl"
                 >
                     <div className="flex items-center justify-center gap-2">
