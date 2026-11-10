@@ -35,7 +35,7 @@ npm ci
 npm run dev
 ```
 
-Open the local URL printed in your terminal. No API key is required to start the game; automatic suggestions and bots use basic fallback responses when no external service is configured.
+Open the local URL printed in your terminal. No API key or paid API service is required. Topics, clues, and bot replies use local fallback responses, so public builds do not contain provider credentials.
 
 ## Build and Check
 
